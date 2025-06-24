@@ -54,6 +54,10 @@ export const geminiContentGenerate = async (req, res) => {
             tempSessions.set(currentSessionId, session);
         }
 
+        // Get existing chat history for this session
+        const existingMessages = tempMessages.get(currentSessionId) || [];
+        console.log('Existing messages in session:', existingMessages.length);
+
         console.log('Saving user message...');
         // Save user message
         const userMessage = {
@@ -65,16 +69,24 @@ export const geminiContentGenerate = async (req, res) => {
             avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=male'
         };
 
-        if (!tempMessages.has(currentSessionId)) {
-            tempMessages.set(currentSessionId, []);
-        }
-        tempMessages.get(currentSessionId).push(userMessage);
+        // Add user message to history
+        existingMessages.push(userMessage);
+        tempMessages.set(currentSessionId, existingMessages);
 
-        console.log('Generating AI response...');
-        // Generate AI response
+        console.log('Generating AI response with chat history...');
+        
+        // Prepare conversation history for Gemini API
+        const conversationHistory = existingMessages.map(msg => ({
+            role: msg.role === 'user' ? 'user' : 'model',
+            parts: [{ text: msg.content }]
+        }));
+
+        console.log('Sending conversation history to Gemini:', conversationHistory.length, 'messages');
+        
+        // Generate AI response with full conversation history
         const response = await ai.models.generateContent({
             model: 'gemini-2.0-flash',
-            contents: data,
+            contents: conversationHistory,
         });
         const responseTime = new Date();
 
@@ -89,23 +101,22 @@ export const geminiContentGenerate = async (req, res) => {
             avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=bot'
         };
 
-        tempMessages.get(currentSessionId).push(botMessage);
+        // Add bot message to history
+        existingMessages.push(botMessage);
+        tempMessages.set(currentSessionId, existingMessages);
 
         // Update session message count
         session.messageCount += 2;
         session.updatedAt = new Date();
 
-        // Get full chat history for this session
-        const chatHistory = tempMessages.get(currentSessionId) || [];
-
-        console.log('Sending response with', chatHistory.length, 'messages');
+        console.log('Sending response with', existingMessages.length, 'messages');
 
         res.status(200).json({
             success: true,
             message: 'Message processed successfully',
             data: {
                 sessionId: currentSessionId,
-                chatHistory: chatHistory
+                chatHistory: existingMessages
             },
         });
     } catch (error) {
@@ -173,6 +184,74 @@ export const createNewChat = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error creating new chat',
+            error: error.message,
+        });
+    }
+};
+
+export const getAllSessions = async (req, res) => {
+    try {
+        const sessions = Array.from(tempSessions.values()).map(session => {
+            const messages = tempMessages.get(session.sessionId) || [];
+            const lastMessage = messages[messages.length - 1];
+            
+            return {
+                sessionId: session.sessionId,
+                messageCount: session.messageCount,
+                createdAt: session.createdAt,
+                updatedAt: session.updatedAt,
+                lastMessage: lastMessage ? {
+                    content: lastMessage.content.substring(0, 100) + (lastMessage.content.length > 100 ? '...' : ''),
+                    timestamp: lastMessage.timestamp,
+                    role: lastMessage.role
+                } : null
+            };
+        }).sort((a, b) => {
+            const dateA = new Date(a.updatedAt).getTime();
+            const dateB = new Date(b.updatedAt).getTime();
+            return dateB - dateA;
+        });
+
+        res.status(200).json({
+            success: true,
+            data: {
+                sessions
+            }
+        });
+    } catch (error) {
+        console.error('Error in getAllSessions:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching sessions',
+            error: error.message,
+        });
+    }
+};
+
+export const deleteSession = async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        
+        if (!sessionId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Session ID is required'
+            });
+        }
+
+        // Remove session and its messages
+        tempSessions.delete(sessionId);
+        tempMessages.delete(sessionId);
+
+        res.status(200).json({
+            success: true,
+            message: 'Session deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error in deleteSession:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error deleting session',
             error: error.message,
         });
     }
