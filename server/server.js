@@ -2,6 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import geminiRoute from './routes/geminiRoute.js';
+import uploadRoute from './routes/uploadRoute.js';
 
 dotenv.config();
 
@@ -13,6 +14,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/gemini', geminiRoute);
+app.use('/upload', uploadRoute);
 
 const PORT = process.env.PORT || 5001;
 
@@ -24,6 +26,7 @@ const startServer = async () => {
         app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
             console.log(`API available at http://localhost:${PORT}/gemini`);
+            console.log(`Upload API available at http://localhost:${PORT}/upload`);
         });
     } catch (error) {
         console.error('Failed to start server:', error);
