@@ -2,8 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import MessageInput from './MessageInput';
 import ChatMessage from './ChatMessage';
 import SessionSidebar from './SessionSidebar';
-import CSVUpload from './CSVUpload';
-import CSVPreview from './CSVPreview';
 
 export default function ChatWindow() {
     const [selectedModel, setSelectedModel] = useState('gemini');
@@ -11,9 +9,6 @@ export default function ChatWindow() {
     const [currentSessionId, setCurrentSessionId] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [showSidebar, setShowSidebar] = useState(true);
-    const [showCSVUpload, setShowCSVUpload] = useState(false);
-    const [showCSVPreview, setShowCSVPreview] = useState(false);
-    const [csvData, setCsvData] = useState(null);
     const messagesEndRef = useRef(null);
     const sidebarRef = useRef(null);
 
@@ -27,14 +22,18 @@ export default function ChatWindow() {
         scrollToBottom();
     }, [chatHistory]);
 
-    const fetchMessage = async (input) => {
+    const fetchMessage = async (displayMessage, fullMessage = null) => {
         setIsLoading(true);
         try {
+            // Use fullMessage if provided (for CSV uploads), otherwise use displayMessage
+            const messageToSend = fullMessage || displayMessage;
+            
             const response = await fetch('http://localhost:5001/gemini', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                    data: input,
+                    displayMessage: displayMessage,
+                    fullMessage: fullMessage,
                     sessionId: currentSessionId 
                 }),
             });
@@ -98,19 +97,6 @@ export default function ChatWindow() {
         createNewChat();
     };
 
-    const handleFileUpload = (uploadedData) => {
-        setCsvData(uploadedData);
-        setShowCSVUpload(false);
-        setShowCSVPreview(true);
-    };
-
-    const handleUseCSVData = (data) => {
-        setShowCSVPreview(false);
-        // Here you can send the CSV data to the AI or process it as needed
-        const csvSummary = `CSV File: ${data.fileName}\nHeaders: ${data.csvPreview.headers.join(', ')}\nTotal Rows: ${data.csvPreview.totalRows}\nPreview Data: ${JSON.stringify(data.csvPreview.data, null, 2)}`;
-        fetchMessage(`I've uploaded a CSV file. Here's the summary:\n${csvSummary}`);
-    };
-
     return (
         <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
             {/* Session Sidebar */}
@@ -152,12 +138,6 @@ export default function ChatWindow() {
                     </div>
                     
                     <div className="flex items-center space-x-4">
-                        <button
-                            onClick={() => setShowCSVUpload(true)}
-                            className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium transition-colors"
-                        >
-                            Upload CSV
-                        </button>
                         <select
                             value={selectedModel}
                             onChange={(e) => setSelectedModel(e.target.value)}
@@ -183,7 +163,7 @@ export default function ChatWindow() {
                                     Start a new conversation
                                 </h3>
                                 <p className="text-gray-500 dark:text-gray-400">
-                                    Type a message below to begin chatting with the AI assistant.
+                                    Type a message below or upload a CSV file to begin chatting with the AI assistant.
                                 </p>
                             </div>
                         </div>
@@ -224,23 +204,6 @@ export default function ChatWindow() {
                     <MessageInput onSubmit={fetchMessage} isLoading={isLoading} />
                 </div>
             </div>
-
-            {/* CSV Upload Modal */}
-            {showCSVUpload && (
-                <CSVUpload
-                    onFileUpload={handleFileUpload}
-                    onClose={() => setShowCSVUpload(false)}
-                />
-            )}
-
-            {/* CSV Preview Modal */}
-            {showCSVPreview && csvData && (
-                <CSVPreview
-                    csvData={csvData}
-                    onClose={() => setShowCSVPreview(false)}
-                    onUseData={handleUseCSVData}
-                />
-            )}
         </div>
     );
 } 

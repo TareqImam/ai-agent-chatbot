@@ -7,21 +7,30 @@ dotenv.config();
 // Temporary in-memory storage for testing
 const tempSessions = new Map();
 const tempMessages = new Map();
+const tempCSVData = new Map(); // Store CSV data for each session
 
 export const geminiContentGenerate = async (req, res) => {
     const requestTime = new Date();
     
     try {
-        console.log('Received request:', { data: req.body.data, sessionId: req.body.sessionId });
+        console.log('Received request:', { 
+            displayMessage: req.body.displayMessage, 
+            fullMessage: req.body.fullMessage, 
+            sessionId: req.body.sessionId 
+        });
         
         if (!process.env.GEMINI_API_KEY) {
             throw new Error('GEMINI_API_KEY is not configured');
         }
         
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const { data, sessionId } = req.body;
+        const { displayMessage, fullMessage, sessionId } = req.body;
         
-        if (!data) {
+        // Use fullMessage if provided (for CSV uploads), otherwise use displayMessage
+        const messageToProcess = fullMessage || displayMessage;
+        const messageToDisplay = displayMessage || fullMessage;
+        
+        if (!messageToProcess) {
             return res.status(400).json({
                 success: false,
                 message: 'Message data is required'
@@ -58,13 +67,19 @@ export const geminiContentGenerate = async (req, res) => {
         const existingMessages = tempMessages.get(currentSessionId) || [];
         console.log('Existing messages in session:', existingMessages.length);
 
+        // Check if this message contains CSV data and store it
+        if (fullMessage && fullMessage.includes('I\'ve uploaded a CSV file:')) {
+            tempCSVData.set(currentSessionId, fullMessage);
+            console.log('Stored CSV data for session:', currentSessionId);
+        }
+
         console.log('Saving user message...');
-        // Save user message
+        // Save user message (only the display message, not the full message with CSV data)
         const userMessage = {
             id: uuidv4(),
             sessionId: currentSessionId,
             role: 'user',
-            content: data,
+            content: messageToDisplay, // Store only what should be displayed
             timestamp: requestTime,
             avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=male'
         };
@@ -76,12 +91,47 @@ export const geminiContentGenerate = async (req, res) => {
         console.log('Generating AI response with chat history...');
         
         // Prepare conversation history for Gemini API
-        const conversationHistory = existingMessages.map(msg => ({
-            role: msg.role === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.content }]
-        }));
+        const conversationHistory = [];
+        
+        // Get stored CSV data for this session
+        const storedCSVData = tempCSVData.get(currentSessionId);
+        
+        console.log('Session ID:', currentSessionId);
+        console.log('Stored CSV data exists:', !!storedCSVData);
+        console.log('Existing messages count:', existingMessages.length);
+        
+        // Always include CSV data as context if it exists (not just for first message)
+        if (storedCSVData) {
+            console.log('Including CSV data in conversation history');
+            conversationHistory.push({
+                role: 'user',
+                parts: [{ text: storedCSVData }]
+            });
+        }
+        
+        // Add all previous messages (both user and bot)
+        for (let i = 0; i < existingMessages.length - 1; i++) {
+            const msg = existingMessages[i];
+            console.log(`Adding message ${i}:`, msg.role, msg.content.substring(0, 50) + '...');
+            conversationHistory.push({
+                role: msg.role === 'user' ? 'user' : 'model',
+                parts: [{ text: msg.content }]
+            });
+        }
+        
+        // For the current message, if we have CSV data stored, send only the user's question
+        // If no CSV data is stored, send the full message
+        const currentMessageText = storedCSVData ? messageToDisplay : messageToProcess;
+        
+        // Add the current message
+        conversationHistory.push({
+            role: 'user',
+            parts: [{ text: currentMessageText }]
+        });
 
         console.log('Sending conversation history to Gemini:', conversationHistory.length, 'messages');
+        console.log('Current message being sent:', currentMessageText);
+        console.log('Full conversation history:', JSON.stringify(conversationHistory, null, 2));
         
         // Generate AI response with full conversation history
         const response = await ai.models.generateContent({
@@ -171,6 +221,7 @@ export const createNewChat = async (req, res) => {
         });
         
         tempMessages.set(newSessionId, []);
+        tempCSVData.delete(newSessionId); // Clear any existing CSV data
 
         res.status(200).json({
             success: true,
@@ -242,6 +293,7 @@ export const deleteSession = async (req, res) => {
         // Remove session and its messages
         tempSessions.delete(sessionId);
         tempMessages.delete(sessionId);
+        tempCSVData.delete(sessionId); // Clear CSV data for this session
 
         res.status(200).json({
             success: true,
